@@ -227,6 +227,12 @@ def _setup_api():
     kernel32.GetModuleHandleW.argtypes = [LPCTSTR]
     kernel32.GetModuleHandleW.restype = HINSTANCE
 
+    kernel32.CreateMutexW.argtypes = [LPVOID, BOOL, LPCTSTR]
+    kernel32.CreateMutexW.restype = HANDLE
+
+    kernel32.GetLastError.argtypes = []
+    kernel32.GetLastError.restype = DWORD
+
     # --- user32 ---
     user32.SetWindowsHookExW.argtypes = [INT, HOOKPROC, HINSTANCE, DWORD]
     user32.SetWindowsHookExW.restype = HHOOK
@@ -782,7 +788,7 @@ def create_overlay_window():
             if lparam == WM_LBUTTONUP:
                 event_queue.put(("tray_show", None))
             elif lparam == WM_RBUTTONUP:
-                threading.Thread(target=show_tray_menu, args=(hwnd,), daemon=True).start()
+                show_tray_menu(hwnd)
             return 0
         elif msg == WM_COMMAND:
             # 备用：如果TrackPopupMenu返回0时通过WM_COMMAND处理
@@ -890,8 +896,9 @@ def draw_overlay(hdc):
 
     if len(pts) == 1 and state.get("calibration_mode"):
         px, py = pts[0]
+        fsize = state.get("font_size", 22)
         tip_font = gdi32.CreateFontW(
-            16, 0, 0, 0, 400, 0, 0, 0,
+            fsize, 0, 0, 0, 400, 0, 0, 0,
             0, 0, 0, 4, 0, "Microsoft YaHei"
         )
         old_font = gdi32.SelectObject(hdc, tip_font)
@@ -1516,17 +1523,17 @@ class MainWindow:
         result = messagebox.askyesnocancel(
             "退出选项",
             "请选择退出方式:\n\n"
-            "是(Y) - 最小化到系统托盘\n"
-            "否(N) - 完全退出程序\n"
+            "是(Y) - 完全退出程序\n"
+            "否(N) - 最小化到系统托盘\n"
             "取消 - 返回",
             parent=self.root,
         )
         if result is None:  # 取消
             return
-        elif result:  # 是 = 最小化到托盘
-            self._minimize_to_tray()
-        else:  # 否 = 完全退出
+        elif result:  # 是 = 完全退出
             self._full_exit()
+        else:  # 否 = 最小化到托盘
+            self._minimize_to_tray()
 
     def _minimize_to_tray(self):
         """最小化到系统托盘"""
@@ -1917,7 +1924,22 @@ class PubgRangingTool:
 # 入口
 # ============================================================
 
+_mutex_handle = None  # 全局保持互斥体句柄不被回收
+
+
 def main():
+    global _mutex_handle
+
+    # 单实例检测
+    MUTEX_NAME = "PUBG_Ranging_Tool_SingleInstance"
+    _mutex_handle = kernel32.CreateMutexW(None, False, MUTEX_NAME)
+    if kernel32.GetLastError() == 183:  # ERROR_ALREADY_EXISTS
+        hwnd = user32.FindWindowW(None, "PUBG 迫击炮测距工具")
+        if hwnd:
+            user32.ShowWindow(hwnd, 9)  # SW_RESTORE
+            user32.SetForegroundWindow(hwnd)
+        sys.exit(0)
+
     # DPI 感知
     try:
         ctypes.windll.shcore.SetProcessDpiAwareness(2)
