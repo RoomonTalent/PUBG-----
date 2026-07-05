@@ -1,0 +1,30 @@
+# PyInstaller build artifacts
+build/
+dist/
+*.spec
+
+# Bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment
+venv/
+env/
+.venv/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Claude Code
+.claude/
+
+# Runtime config (user-specific)
+pubg_ranging_config.json
