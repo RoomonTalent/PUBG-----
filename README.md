@@ -1,3 +1,11 @@
+<!--
+ * @Author: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
+ * @Date: 2026-07-05 21:55:12
+ * @LastEditors: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
+ * @LastEditTime: 2026-07-05 22:43:21
+ * @FilePath: \PUBG迫击炮测距\README.md
+ * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
+-->
 # PUBG 迫击炮测距工具 (PUBG Mortar Ranging Tool)
 
 一个为 PUBG 游戏设计的迫击炮测距辅助工具。通过透明覆盖层在游戏地图上标记两点并计算像素距离，结合参考标定值实时换算实际距离（米）。
@@ -6,9 +14,9 @@
 
 - **自动检测 PUBG 启动** — 支持后台轮询检测 `TslGame.exe` 进程，游戏启动后自动激活覆盖层
 - **F8 快捷菜单** — 呼出参考值输入框，可拖动位置，位置自动记忆
-- **测距标记** — 右键标记两个点，自动绘制连线并在中点显示像素距离和实际距离（米）
-- **中键标定** — 鼠标中键进入标定模式，在地图上标记 100m 距离后自动计算参考像素值
-- **全屏兼容** — 可选自动切换 PUBG 为无边框窗口模式（修改 `GameUserSettings.ini`）并处理全屏优化注册表标志
+- **测距标记** — 连续两次右键或者中键标记两个点，自动绘制连线并在中点显示像素距离和实际距离（米）
+- **中键标定** — 鼠标中键进入标定模式，然后在地图右键上标记 100m 距离后自动计算参考像素值（务必先中键再右键）
+- **全屏兼容** — （正在尝试制作测试）可选自动切换 PUBG 为无边框窗口模式（修改 `GameUserSettings.ini`）并处理全屏优化注册表标志
 - **系统托盘** — 支持最小化到托盘，右键菜单可恢复窗口或完全退出
 - **配置文件持久化** — 参考值、字体大小、窗口位置、兼容选项等均保存到本地 JSON 配置
 - **字体可调** — 主界面可调整标注字体大小（10-80），实时生效
