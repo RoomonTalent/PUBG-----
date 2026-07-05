@@ -2,7 +2,7 @@
  * @Author: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
  * @Date: 2026-07-05 21:55:12
  * @LastEditors: error: error: git config user.name & please set dead value or install git && error: git config user.email & please set dead value or install git & please set dead value or install git
- * @LastEditTime: 2026-07-05 22:43:21
+ * @LastEditTime: 2026-07-05 22:45:30
  * @FilePath: \PUBG迫击炮测距\README.md
  * @Description: 这是默认设置,请设置`customMade`, 打开koroFileHeader查看配置 进行设置: https://github.com/OBKoro1/koro1FileHeader/wiki/%E9%85%8D%E7%BD%AE
 -->
@@ -55,7 +55,7 @@ pyinstaller --onefile --windowed --name "PUBG测距工具" --hidden-import psuti
 | 程序启动 | 自动检测 PUBG，状态栏显示等待/运行状态 |
 | 点击「我已启动游戏」| 跳过检测，立即激活覆盖层（调试模式） |
 | `F8` | 呼出 / 关闭参考值输入菜单 |
-| 右键 × 2 | 在地图上标记两个点，连线并计算距离 |
+| 右键 × 2 或 中键 × 2 | 在地图上标记两个点，连线并计算距离 |
 | 中键 → 右键 | 标定模式：中键标第一点 → 右键标第二点 → 自动填入参考值 |
 | `M` / `Tab` / `Esc` | 关闭测距菜单 |
 | 关闭窗口 | 弹出选项：最小化到托盘 / 完全退出 |
