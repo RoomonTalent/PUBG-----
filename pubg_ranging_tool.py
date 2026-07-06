@@ -53,6 +53,7 @@ WM_KEYDOWN = 0x0100
 WM_SYSKEYDOWN = 0x0104
 WM_RBUTTONDOWN = 0x0204
 WM_MBUTTONDOWN = 0x0207
+WM_LBUTTONDOWN = 0x0201
 WM_PAINT = 0x000F
 WM_DESTROY = 0x0002
 WM_COMMAND = 0x0111
@@ -305,6 +306,15 @@ def _setup_api():
 
     user32.PeekMessageW.argtypes = [ctypes.POINTER(MSG), HWND, UINT, UINT, UINT]
     user32.PeekMessageW.restype = BOOL
+
+    user32.GetMessageW.argtypes = [ctypes.POINTER(MSG), HWND, UINT, UINT]
+    user32.GetMessageW.restype = BOOL
+
+    user32.SetTimer.argtypes = [HWND, UINT, UINT, LPVOID]
+    user32.SetTimer.restype = UINT
+
+    user32.KillTimer.argtypes = [HWND, UINT]
+    user32.KillTimer.restype = BOOL
 
     user32.PostMessageW.argtypes = [HWND, UINT, WPARAM, LPARAM]
     user32.PostMessageW.restype = BOOL
@@ -639,8 +649,16 @@ tray_hicon = None
 shutdown_flag = threading.Event()
 hooks_ready = threading.Event()
 
+# 快速标志位 — 无锁读取,用于 Hook 回调中避免 state_lock 争用
+_overlay_active_fast = False
+_menu_showing_fast = False
+
 
 def set_overlay_active(active):
+    global _overlay_active_fast, _menu_showing_fast
+    _overlay_active_fast = active
+    if not active:
+        _menu_showing_fast = False
     with state_lock:
         app_state["overlay_active"] = active
         if not active:
@@ -653,6 +671,8 @@ def set_overlay_active(active):
 
 
 def set_menu_visible(visible):
+    global _menu_showing_fast
+    _menu_showing_fast = visible
     with state_lock:
         app_state["show_menu"] = visible
         if not visible:
@@ -797,6 +817,10 @@ def create_overlay_window():
             elif wparam == ID_TRAY_EXIT:
                 event_queue.put(("tray_exit", None))
             return 0
+        elif msg == 0x0113:  # WM_TIMER
+            user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
+            return 0
         elif msg == WM_DESTROY:
             remove_tray_icon(hwnd)
             user32.PostQuitMessage(0)
@@ -904,7 +928,7 @@ def draw_overlay(hdc):
         old_font = gdi32.SelectObject(hdc, tip_font)
         gdi32.SetBkMode(hdc, TRANSPARENT)
         gdi32.SetTextColor(hdc, rgb(100, 255, 100))
-        hint = "标定模式: 右键标记100m距离"
+        hint = "标定模式: 左键标记100m距离"
         gdi32.TextOutW(hdc, px + 12, py - 10, hint, len(hint))
         gdi32.SelectObject(hdc, old_font)
         gdi32.DeleteObject(tip_font)
@@ -979,16 +1003,13 @@ def _on_key_event(key_code, is_keydown):
         return
 
     now_ms = int(time.time() * 1000)
-    state = get_state_snapshot()
-    overlay_active = state["overlay_active"]
-    show_menu = state["show_menu"]
 
-    if key_code == VK_F8 and overlay_active:
+    if key_code == VK_F8 and _overlay_active_fast:
         if now_ms - _last_f8_time > THROTTLE_MS:
             _last_f8_time = now_ms
             event_queue.put(("toggle_menu", None))
 
-    elif key_code in (VK_M, VK_TAB, VK_ESCAPE) and show_menu:
+    elif key_code in (VK_M, VK_TAB, VK_ESCAPE) and _menu_showing_fast:
         if key_code == VK_M and now_ms - _last_m_time > THROTTLE_MS:
             _last_m_time = now_ms
             event_queue.put(("close_menu", None))
@@ -1003,11 +1024,10 @@ def _on_key_event(key_code, is_keydown):
 def _on_right_click(x, y):
     global _last_rclick_time
 
-    now_ms = int(time.time() * 1000)
-    state = get_state_snapshot()
-    if not state["show_menu"]:
+    if not _menu_showing_fast:
         return
 
+    now_ms = int(time.time() * 1000)
     if now_ms - _last_rclick_time > THROTTLE_MS:
         _last_rclick_time = now_ms
         event_queue.put(("right_click", (x, y)))
@@ -1016,14 +1036,19 @@ def _on_right_click(x, y):
 def _on_middle_click(x, y):
     global _last_mclick_time
 
-    now_ms = int(time.time() * 1000)
-    state = get_state_snapshot()
-    if not state["show_menu"]:
+    if not _menu_showing_fast:
         return
 
+    now_ms = int(time.time() * 1000)
     if now_ms - _last_mclick_time > THROTTLE_MS:
         _last_mclick_time = now_ms
         event_queue.put(("middle_click", (x, y)))
+
+
+def _on_left_click(x, y):
+    if not _menu_showing_fast:
+        return
+    event_queue.put(("left_click", (x, y)))
 
 
 def _keyboard_hook_proc(nCode, wParam, lParam):
@@ -1042,6 +1067,9 @@ def _mouse_hook_proc(nCode, wParam, lParam):
         elif wParam == WM_MBUTTONDOWN:
             ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
             _on_middle_click(ms.pt.x, ms.pt.y)
+        elif wParam == WM_LBUTTONDOWN:
+            ms = ctypes.cast(lParam, ctypes.POINTER(MSLLHOOKSTRUCT)).contents
+            _on_left_click(ms.pt.x, ms.pt.y)
     return user32.CallNextHookEx(None, nCode, wParam, lParam)
 
 
@@ -1087,25 +1115,21 @@ def overlay_thread_main():
         hooks_ready.set()
         log_message("覆盖层和钩子系统已启动")
 
-        last_topmost = time.time()
+        # 定时器: 每3秒刷新一次 TOPMOST 状态
+        TIMER_ID = 1
+        user32.SetTimer(hwnd, TIMER_ID, 3000, None)
+
         msg = MSG()
         while not shutdown_flag.is_set():
-            ret = user32.PeekMessageW(ctypes.byref(msg), None, 0, 0, 1)
-            if ret == 0:
-                time.sleep(0.005)
-                now = time.time()
-                if now - last_topmost > 2.0:
-                    user32.SetWindowPos(hwnd, HWND_TOPMOST, 0, 0, 0, 0,
-                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE)
-                    last_topmost = now
-                continue
-
-            if msg.message == 0x0012:  # WM_QUIT
+            # GetMessageW 阻塞等待消息 — 无轮询延迟, 鼠标事件即时处理
+            ret = user32.GetMessageW(ctypes.byref(msg), None, 0, 0)
+            if ret in (0, -1):  # WM_QUIT 或错误
                 break
 
             user32.TranslateMessage(ctypes.byref(msg))
             user32.DispatchMessageW(ctypes.byref(msg))
 
+        user32.KillTimer(hwnd, TIMER_ID)
         uninstall_hooks()
         log_message("钩子系统已卸载")
 
@@ -1244,7 +1268,7 @@ class MainWindow:
         tip_frame = tk.Frame(self.root, bg="#1a1a2e")
         tip_frame.pack(fill=tk.X, padx=25, pady=(3, 3))
 
-        tips = "F8=呼出菜单 | 右键(两次)=标记测距 | 中键=标定模式 | M/Tab/Esc=关闭菜单"
+        tips = "F8=呼出菜单 | 右键/中键=标记测距 | 中键→左键=标定 | M/Tab/Esc=关闭菜单"
         tk.Label(
             tip_frame, text=tips,
             font=("Microsoft YaHei", 7),
@@ -1829,6 +1853,10 @@ class PubgRangingTool:
             x, y = data
             self._handle_middle_click(x, y)
 
+        elif event_type == "left_click":
+            x, y = data
+            self._handle_left_click(x, y)
+
         elif event_type == "tray_show":
             self.main_window.restore_from_tray()
 
@@ -1837,6 +1865,7 @@ class PubgRangingTool:
 
     def _handle_right_click(self, x, y):
         pts_before = len(get_state_snapshot()["points"])
+        calib = get_state_snapshot().get("calibration_mode", False)
 
         if pts_before >= 2:
             with state_lock:
@@ -1844,11 +1873,37 @@ class PubgRangingTool:
 
         add_or_clear_point(x, y)
 
-        state_after = get_state_snapshot()
-        pts_after = len(state_after["points"])
-        calib = state_after.get("calibration_mode", False)
+        if calib and pts_before == 1:
+            with state_lock:
+                app_state["calibration_mode"] = False
 
-        if calib and pts_after == 2:
+    def _handle_middle_click(self, x, y):
+        pts_before = len(get_state_snapshot()["points"])
+        calib = get_state_snapshot().get("calibration_mode", False)
+
+        if pts_before >= 2:
+            with state_lock:
+                app_state["calibration_mode"] = False
+
+        add_or_clear_point(x, y)
+
+        if calib and pts_before == 1:
+            with state_lock:
+                app_state["calibration_mode"] = False
+        elif pts_before == 0:
+            with state_lock:
+                app_state["calibration_mode"] = True
+            log_message("标定模式: 请左键标记地图上100m距离的第二个点")
+
+    def _handle_left_click(self, x, y):
+        state = get_state_snapshot()
+        if not state.get("calibration_mode") or len(state["points"]) != 1:
+            return
+
+        add_or_clear_point(x, y)
+
+        state_after = get_state_snapshot()
+        if len(state_after["points"]) == 2:
             px = state_after["pixel_distance"]
             set_reference(px)
             save_config(reference=px)
@@ -1862,19 +1917,6 @@ class PubgRangingTool:
                 except Exception:
                     pass
             log_message(f"标定完成: {px:.1f} 像素 → 已自动设为100m参考值", "good")
-
-    def _handle_middle_click(self, x, y):
-        pts_before = len(get_state_snapshot()["points"])
-
-        with state_lock:
-            app_state["calibration_mode"] = True
-
-        add_or_clear_point(x, y)
-
-        if pts_before == 0:
-            log_message("标定模式: 请右键标记地图上100m距离的第二个点")
-        else:
-            log_message("标定模式: 已重新开始标定")
 
     def _toggle_menu(self):
         if self.menu_visible:
