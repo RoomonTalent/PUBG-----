@@ -838,6 +838,110 @@ def uninstall_hooks():
         user32.UnhookWindowsHookEx(mouse_hook)
 
 
+def rgb(r, g, b):
+    return r | (g << 8) | (b << 16)
+
+
+def draw_overlay(hdc):
+    """在覆盖窗口上绘制标记点和连线"""
+    state = get_state_snapshot()
+
+    if not state["overlay_active"]:
+        return
+
+    pts = state["points"]
+
+    if not pts:
+        if state["show_menu"]:
+            font = gdi32.CreateFontW(
+                22, 0, 0, 0, 400, 0, 0, 0,
+                0, 0, 0, 4, 0, "Microsoft YaHei"
+            )
+            old_font = gdi32.SelectObject(hdc, font)
+            gdi32.SetBkMode(hdc, TRANSPARENT)
+            gdi32.SetTextColor(hdc, rgb(200, 200, 200))
+            hint = "右键标记第一个点"
+            sw = user32.GetSystemMetrics(0)
+            sh = user32.GetSystemMetrics(1)
+            gdi32.TextOutW(hdc, sw // 2 - 90, sh // 2 - 40, hint, len(hint))
+            gdi32.SelectObject(hdc, old_font)
+            gdi32.DeleteObject(font)
+        return
+
+    point_radius = 5
+    red_brush = gdi32.CreateSolidBrush(rgb(255, 60, 60))
+    white_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 255, 255))
+    yellow_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 220, 50))
+
+    for px, py in pts:
+        old_brush = gdi32.SelectObject(hdc, red_brush)
+        old_pen = gdi32.SelectObject(hdc, white_pen)
+        gdi32.Ellipse(hdc,
+                       px - point_radius, py - point_radius,
+                       px + point_radius, py + point_radius)
+        gdi32.SelectObject(hdc, old_brush)
+        gdi32.SelectObject(hdc, old_pen)
+
+    if len(pts) == 1 and state.get("calibration_mode"):
+        px, py = pts[0]
+        fsize = state.get("font_size", 22)
+        tip_font = gdi32.CreateFontW(
+            fsize, 0, 0, 0, 400, 0, 0, 0,
+            0, 0, 0, 4, 0, "Microsoft YaHei"
+        )
+        old_font = gdi32.SelectObject(hdc, tip_font)
+        gdi32.SetBkMode(hdc, TRANSPARENT)
+        gdi32.SetTextColor(hdc, rgb(100, 255, 100))
+        hint = "标定模式: 左键标记100m距离"
+        gdi32.TextOutW(hdc, px + 12, py - 10, hint, len(hint))
+        gdi32.SelectObject(hdc, old_font)
+        gdi32.DeleteObject(tip_font)
+
+    if len(pts) == 2:
+        x1, y1 = pts[0]
+        x2, y2 = pts[1]
+
+        line_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 220, 50))
+        old_pen = gdi32.SelectObject(hdc, line_pen)
+        gdi32.MoveToEx(hdc, x1, y1, None)
+        gdi32.LineTo(hdc, x2, y2)
+        gdi32.SelectObject(hdc, old_pen)
+        gdi32.DeleteObject(line_pen)
+
+        mid_x = (x1 + x2) // 2
+        mid_y = (y1 + y2) // 2
+
+        fsize = state.get("font_size", 22)
+        font = gdi32.CreateFontW(
+            fsize, 0, 0, 0, 700, 0, 0, 0,
+            0, 0, 0, 4, 0, "Microsoft YaHei"
+        )
+        old_font = gdi32.SelectObject(hdc, font)
+        gdi32.SetBkMode(hdc, TRANSPARENT)
+
+        px_dist = state["pixel_distance"]
+        real_dist = state["real_distance"]
+
+        if real_dist > 0:
+            gdi32.SetTextColor(hdc, rgb(255, 255, 255))
+            t1 = f"像素: {px_dist:.1f}"
+            gdi32.TextOutW(hdc, mid_x - 50, mid_y - fsize - 6, t1, len(t1))
+            gdi32.SetTextColor(hdc, rgb(255, 220, 50))
+            t2 = f"{real_dist:.1f}m"
+            gdi32.TextOutW(hdc, mid_x - 35, mid_y + 6, t2, len(t2))
+        else:
+            gdi32.SetTextColor(hdc, rgb(255, 255, 255))
+            t1 = f"像素: {px_dist:.1f}"
+            gdi32.TextOutW(hdc, mid_x - 50, mid_y - fsize // 2, t1, len(t1))
+
+        gdi32.SelectObject(hdc, old_font)
+        gdi32.DeleteObject(font)
+
+    gdi32.DeleteObject(red_brush)
+    gdi32.DeleteObject(white_pen)
+    gdi32.DeleteObject(yellow_pen)
+
+
 # ============================================================
 # Hook + 覆盖窗口线程
 # ============================================================
@@ -922,8 +1026,8 @@ class MainWindow:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("PUBG 迫击炮测距工具")
-        self.root.geometry("500x520")
-        self.root.minsize(450, 450)
+        self.root.geometry("580x520")
+        self.root.minsize(500, 450)
         self.root.configure(bg="#1a1a2e")
 
         # 设置窗口图标
@@ -937,7 +1041,7 @@ class MainWindow:
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
-        x = (sw - 500) // 2
+        x = (sw - 580) // 2
         y = (sh - 520) // 2
         self.root.geometry(f"+{x}+{y}")
 
