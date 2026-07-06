@@ -38,8 +38,6 @@ if %errorlevel% equ 0 (
     echo   打包成功！
     echo   输出文件: dist\PUBG测距工具.exe
     echo ========================================
-    echo   注意: dist\ 文件夹已被 .gitignore 忽略, 不会上传到 Git
-    echo ========================================
 ) else (
     echo.
     echo [错误] 打包失败，请检查上方错误信息
