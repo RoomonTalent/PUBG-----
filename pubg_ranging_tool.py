@@ -1622,7 +1622,7 @@ class InputMenu:
 
         self.window = tk.Toplevel()
         self.window.title("测距菜单")
-        self.window.geometry("320x180")
+        self.window.geometry("320x230")
         self.window.resizable(False, False)
         self.window.attributes("-topmost", True)
         self.window.configure(bg="#1a1a2e")
@@ -1887,10 +1887,12 @@ class PubgRangingTool:
 
         add_or_clear_point(x, y)
 
+        pts_after = len(get_state_snapshot()["points"])
+
         if calib and pts_before == 1:
             with state_lock:
                 app_state["calibration_mode"] = False
-        elif pts_before == 0:
+        elif pts_after == 1 and pts_before != 1:
             with state_lock:
                 app_state["calibration_mode"] = True
             log_message("标定模式: 请左键标记地图上100m距离的第二个点")
