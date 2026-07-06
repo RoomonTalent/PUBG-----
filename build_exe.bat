@@ -30,8 +30,6 @@ pyinstaller ^
     --hidden-import tkinter ^
     --hidden-import queue ^
     --hidden-import json ^
-    --hidden-import re ^
-    --hidden-import winreg ^
     pubg_ranging_tool.py
 
 if %errorlevel% equ 0 (

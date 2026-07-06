@@ -17,7 +17,6 @@ import math
 import queue
 import sys
 import os
-import re
 import tkinter as tk
 from tkinter import ttk, messagebox
 from datetime import datetime
@@ -422,8 +421,7 @@ def get_app_dir():
 CONFIG_PATH = os.path.join(get_app_dir(), "pubg_ranging_config.json")
 
 
-def save_config(reference=None, menu_x=None, menu_y=None, font_size=None,
-                fullscreen_opt=None):
+def save_config(reference=None, menu_x=None, menu_y=None, font_size=None):
     """保存配置到文件（只更新传入的字段，保留其他字段不变）"""
     try:
         data = {}
@@ -438,8 +436,6 @@ def save_config(reference=None, menu_x=None, menu_y=None, font_size=None,
             data["menu_y"] = menu_y
         if font_size is not None:
             data["font_size"] = font_size
-        if fullscreen_opt is not None:
-            data["fullscreen_opt"] = fullscreen_opt
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(data, f)
     except Exception as e:
@@ -462,11 +458,10 @@ def load_config():
                     fs = 10
                 if fs > 80:
                     fs = 80
-                fo = bool(data.get("fullscreen_opt", False))
-                return ref, mx, my, fs, fo
+                return ref, mx, my, fs
     except Exception as e:
         log_message(f"读取配置文件失败: {e}", "warn")
-    return 0.0, None, None, 22, False
+    return 0.0, None, None, 22
 
 
 # ============================================================
@@ -1456,9 +1451,6 @@ class PubgRangingTool:
     def run(self):
         self.main_window = MainWindow()
 
-        fo = getattr(self, "_saved_fo", False)
-        self.main_window.init_compat_settings(fo)
-
         def on_detected():
             """PUBG检测到后启动覆盖层"""
             self._start_overlay()
@@ -1675,7 +1667,7 @@ def main():
 
     log_message("PUBG 迫击炮测距工具 v1.1 启动", "good")
 
-    saved_ref, _, _, saved_fs, saved_fo = load_config()
+    saved_ref, _, _, saved_fs = load_config()
     if saved_ref > 0:
         set_reference(saved_ref)
         log_message(f"已加载保存的参考像素: {saved_ref}")
@@ -1684,7 +1676,6 @@ def main():
     log_message(f"标注字体大小: {saved_fs}")
 
     app = PubgRangingTool()
-    app._saved_fo = saved_fo
 
     try:
         app.run()
