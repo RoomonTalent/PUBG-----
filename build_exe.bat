@@ -23,6 +23,8 @@ pyinstaller ^
     --onefile ^
     --windowed ^
     --name "PUBG测距工具" ^
+    --icon="icon.ico" ^
+    --add-data "icon.ico;." ^
     --add-data "requirements.txt;." ^
     --hidden-import psutil ^
     --hidden-import tkinter ^

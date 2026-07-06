@@ -83,6 +83,7 @@ HWND_TOPMOST = -1
 TRANSPARENT = 1
 PS_SOLID = 0
 
+
 # System metrics
 SM_XVIRTUALSCREEN = 76
 SM_YVIRTUALSCREEN = 77
@@ -295,6 +296,9 @@ def _setup_api():
     user32.LoadIconW.argtypes = [HINSTANCE, ctypes.wintypes.LPARAM]
     user32.LoadIconW.restype = HICON
 
+    user32.LoadImageW.argtypes = [HINSTANCE, LPCTSTR, UINT, INT, INT, UINT]
+    user32.LoadImageW.restype = HANDLE
+
     user32.ShowWindow.argtypes = [HWND, INT]
     user32.ShowWindow.restype = BOOL
 
@@ -419,7 +423,7 @@ CONFIG_PATH = os.path.join(get_app_dir(), "pubg_ranging_config.json")
 
 
 def save_config(reference=None, menu_x=None, menu_y=None, font_size=None,
-                borderless_mode=None, fullscreen_opt=None):
+                fullscreen_opt=None):
     """保存配置到文件（只更新传入的字段，保留其他字段不变）"""
     try:
         data = {}
@@ -434,8 +438,6 @@ def save_config(reference=None, menu_x=None, menu_y=None, font_size=None,
             data["menu_y"] = menu_y
         if font_size is not None:
             data["font_size"] = font_size
-        if borderless_mode is not None:
-            data["borderless_mode"] = borderless_mode
         if fullscreen_opt is not None:
             data["fullscreen_opt"] = fullscreen_opt
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -460,157 +462,11 @@ def load_config():
                     fs = 10
                 if fs > 80:
                     fs = 80
-                bm = bool(data.get("borderless_mode", False))
                 fo = bool(data.get("fullscreen_opt", False))
-                return ref, mx, my, fs, bm, fo
+                return ref, mx, my, fs, fo
     except Exception as e:
         log_message(f"读取配置文件失败: {e}", "warn")
-    return 0.0, None, None, 22, False, False
-
-
-# ============================================================
-# PUBG 全屏兼容方案
-# ============================================================
-
-PUBG_CONFIG_DIR = os.path.join(
-    os.environ.get("LOCALAPPDATA", ""),
-    "TslGame", "Saved", "Config", "WindowsNoEditor"
-)
-PUBG_SETTINGS_INI = os.path.join(PUBG_CONFIG_DIR, "GameUserSettings.ini")
-
-_ini_original = {}  # 记录原始值，用于退出时恢复
-
-
-def patch_pubg_ini_to_borderless():
-    """将 PUBG GameUserSettings.ini 切换为无边框窗口模式"""
-    global _ini_original
-    try:
-        if not os.path.exists(PUBG_SETTINGS_INI):
-            log_message("未找到 PUBG 配置文件，无法切换无边框模式", "warn")
-            return False
-
-        with open(PUBG_SETTINGS_INI, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        # 查找并记录原始值
-        changed = False
-        for key in ["FullscreenMode", "LastConfirmedFullscreenMode"]:
-            m = re.search(rf"^{key}=(\d+)", content, re.MULTILINE)
-            if m:
-                old_val = m.group(1)
-                if key not in _ini_original:
-                    _ini_original[key] = old_val
-                if old_val != "1":
-                    content = re.sub(
-                        rf"^{key}=\d+", f"{key}=1", content, flags=re.MULTILINE
-                    )
-                    changed = True
-            else:
-                if key not in _ini_original:
-                    _ini_original[key] = None
-                content += f"\n{key}=1"
-                changed = True
-
-        if changed:
-            with open(PUBG_SETTINGS_INI, "w", encoding="utf-8") as f:
-                f.write(content)
-            log_message("已自动切换 PUBG 为无边框窗口模式 (FullscreenMode=1)", "good")
-        else:
-            log_message("PUBG 已处于无边框窗口模式，无需切换")
-        return True
-    except Exception as e:
-        log_message(f"切换无边框模式失败: {e}", "error")
-        return False
-
-
-def restore_pubg_ini():
-    """恢复 PUBG GameUserSettings.ini 原始设置"""
-    global _ini_original
-    if not _ini_original:
-        return
-    try:
-        if not os.path.exists(PUBG_SETTINGS_INI):
-            return
-
-        with open(PUBG_SETTINGS_INI, "r", encoding="utf-8") as f:
-            content = f.read()
-
-        for key, old_val in _ini_original.items():
-            if old_val is not None:
-                content = re.sub(
-                    rf"^{key}=\d+", f"{key}={old_val}", content, flags=re.MULTILINE
-                )
-
-        with open(PUBG_SETTINGS_INI, "w", encoding="utf-8") as f:
-            f.write(content)
-        log_message("已恢复 PUBG 原始显示模式设置")
-        _ini_original = {}
-    except Exception as e:
-        log_message(f"恢复 PUBG 设置失败: {e}", "warn")
-
-
-def check_fullscreen_opt_disabled():
-    """检查 PUBG 是否被设置了'禁用全屏优化'"""
-    try:
-        import winreg
-        key_path = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
-        try:
-            key = winreg.OpenKey(winreg.HKEY_CURRENT_USER, key_path)
-            i = 0
-            while True:
-                try:
-                    name, value, _ = winreg.EnumValue(key, i)
-                    if "TslGame" in name or "PUBG" in name:
-                        if "DISABLEFULLSCREENOPTIMIZE" in value.upper():
-                            winreg.CloseKey(key)
-                            return True, name
-                    i += 1
-                except OSError:
-                    break
-            winreg.CloseKey(key)
-        except FileNotFoundError:
-            pass
-    except Exception:
-        pass
-    return False, None
-
-
-def enable_fullscreen_opt():
-    """移除 PUBG 的'禁用全屏优化'注册表标志"""
-    try:
-        import winreg
-        key_path = r"Software\Microsoft\Windows NT\CurrentVersion\AppCompatFlags\Layers"
-        try:
-            key = winreg.OpenKey(
-                winreg.HKEY_CURRENT_USER, key_path,
-                0, winreg.KEY_READ | winreg.KEY_WRITE
-            )
-            i = 0
-            while True:
-                try:
-                    name, value, _ = winreg.EnumValue(key, i)
-                    if "TslGame" in name or "PUBG" in name:
-                        if "DISABLEFULLSCREENOPTIMIZE" in value.upper():
-                            new_val = re.sub(
-                                r'\s*DISABLEFULLSCREENOPTIMIZE\s*',
-                                ' ', value, flags=re.IGNORECASE
-                            ).strip()
-                            if new_val:
-                                winreg.SetValueEx(key, name, 0, winreg.REG_SZ, new_val)
-                            else:
-                                winreg.DeleteValue(key, name)
-                            winreg.CloseKey(key)
-                            log_message(f"已移除 PUBG 的'禁用全屏优化'标志", "good")
-                            return True
-                    i += 1
-                except OSError:
-                    break
-            winreg.CloseKey(key)
-        except FileNotFoundError:
-            pass
-    except Exception as e:
-        log_message(f"移除全屏优化禁用标志失败: {e}", "warn")
-    return False
+    return 0.0, None, None, 22, False
 
 
 # ============================================================
@@ -641,6 +497,7 @@ app_state = {
     "real_distance": 0.0,
     "font_size": 22,
     "calibration_mode": False,
+
 }
 
 overlay_hwnd = None
@@ -724,13 +581,17 @@ def get_state_snapshot():
 # 托盘图标
 # ============================================================
 
+APP_ICON_PATH = os.path.join(get_app_dir(), "icon.ico")
+
+
 def create_app_icon():
-    """创建托盘图标 (使用系统内置图标)"""
-    # IDI_APPLICATION = 32512, 使用系统默认应用图标
+    """加载自定义图标 (托盘/窗口)"""
+    if os.path.exists(APP_ICON_PATH):
+        hicon = user32.LoadImageW(None, APP_ICON_PATH, 1, 0, 0, 0x00000010)
+        if hicon:
+            return hicon
+    # 备用: 系统默认图标
     hicon = user32.LoadIconW(None, 32512)
-    if not hicon:
-        # 备用: 使用信息图标
-        hicon = user32.LoadIconW(None, 32516)  # IDI_INFORMATION
     return hicon
 
 
@@ -878,122 +739,7 @@ def rgb(r, g, b):
     return r | (g << 8) | (b << 16)
 
 
-def draw_overlay(hdc):
-    """在覆盖窗口上绘制标记点和连线"""
-    state = get_state_snapshot()
 
-    if not state["overlay_active"]:
-        return
-
-    pts = state["points"]
-
-    if not pts:
-        if state["show_menu"]:
-            font = gdi32.CreateFontW(
-                22, 0, 0, 0, 400, 0, 0, 0,
-                0, 0, 0, 4, 0, "Microsoft YaHei"
-            )
-            old_font = gdi32.SelectObject(hdc, font)
-            gdi32.SetBkMode(hdc, TRANSPARENT)
-            gdi32.SetTextColor(hdc, rgb(200, 200, 200))
-            hint = "右键标记第一个点"
-            sw = user32.GetSystemMetrics(0)
-            sh = user32.GetSystemMetrics(1)
-            gdi32.TextOutW(hdc, sw // 2 - 90, sh // 2 - 40, hint, len(hint))
-            gdi32.SelectObject(hdc, old_font)
-            gdi32.DeleteObject(font)
-        return
-
-    point_radius = 5
-    red_brush = gdi32.CreateSolidBrush(rgb(255, 60, 60))
-    white_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 255, 255))
-    yellow_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 220, 50))
-
-    for px, py in pts:
-        old_brush = gdi32.SelectObject(hdc, red_brush)
-        old_pen = gdi32.SelectObject(hdc, white_pen)
-        gdi32.Ellipse(hdc,
-                       px - point_radius, py - point_radius,
-                       px + point_radius, py + point_radius)
-        gdi32.SelectObject(hdc, old_brush)
-        gdi32.SelectObject(hdc, old_pen)
-
-    if len(pts) == 1 and state.get("calibration_mode"):
-        px, py = pts[0]
-        fsize = state.get("font_size", 22)
-        tip_font = gdi32.CreateFontW(
-            fsize, 0, 0, 0, 400, 0, 0, 0,
-            0, 0, 0, 4, 0, "Microsoft YaHei"
-        )
-        old_font = gdi32.SelectObject(hdc, tip_font)
-        gdi32.SetBkMode(hdc, TRANSPARENT)
-        gdi32.SetTextColor(hdc, rgb(100, 255, 100))
-        hint = "标定模式: 左键标记100m距离"
-        gdi32.TextOutW(hdc, px + 12, py - 10, hint, len(hint))
-        gdi32.SelectObject(hdc, old_font)
-        gdi32.DeleteObject(tip_font)
-
-    if len(pts) == 2:
-        x1, y1 = pts[0]
-        x2, y2 = pts[1]
-
-        line_pen = gdi32.CreatePen(PS_SOLID, 2, rgb(255, 220, 50))
-        old_pen = gdi32.SelectObject(hdc, line_pen)
-        gdi32.MoveToEx(hdc, x1, y1, None)
-        gdi32.LineTo(hdc, x2, y2)
-        gdi32.SelectObject(hdc, old_pen)
-        gdi32.DeleteObject(line_pen)
-
-        mid_x = (x1 + x2) // 2
-        mid_y = (y1 + y2) // 2
-
-        fsize = state.get("font_size", 22)
-        font = gdi32.CreateFontW(
-            fsize, 0, 0, 0, 700, 0, 0, 0,
-            0, 0, 0, 4, 0, "Microsoft YaHei"
-        )
-        old_font = gdi32.SelectObject(hdc, font)
-        gdi32.SetBkMode(hdc, TRANSPARENT)
-
-        px_dist = state["pixel_distance"]
-        real_dist = state["real_distance"]
-
-        if real_dist > 0:
-            gdi32.SetTextColor(hdc, rgb(255, 255, 255))
-            t1 = f"像素: {px_dist:.1f}"
-            gdi32.TextOutW(hdc, mid_x - 50, mid_y - fsize - 6, t1, len(t1))
-            gdi32.SetTextColor(hdc, rgb(255, 220, 50))
-            t2 = f"{real_dist:.1f}m"
-            gdi32.TextOutW(hdc, mid_x - 35, mid_y + 6, t2, len(t2))
-        else:
-            gdi32.SetTextColor(hdc, rgb(255, 255, 255))
-            t1 = f"像素: {px_dist:.1f}"
-            gdi32.TextOutW(hdc, mid_x - 50, mid_y - fsize // 2, t1, len(t1))
-
-        gdi32.SelectObject(hdc, old_font)
-        gdi32.DeleteObject(font)
-
-    gdi32.DeleteObject(red_brush)
-    gdi32.DeleteObject(white_pen)
-    gdi32.DeleteObject(yellow_pen)
-
-
-# ============================================================
-# 低级别键盘和鼠标 Hook
-# ============================================================
-
-kb_hook = None
-mouse_hook = None
-kb_proc_ref = None
-mouse_proc_ref = None
-
-_last_f8_time = 0
-_last_m_time = 0
-_last_tab_time = 0
-_last_esc_time = 0
-_last_rclick_time = 0
-_last_mclick_time = 0
-THROTTLE_MS = 300
 
 
 def _on_key_event(key_code, is_keydown):
@@ -1181,16 +927,23 @@ class MainWindow:
     def __init__(self):
         self.root = tk.Tk()
         self.root.title("PUBG 迫击炮测距工具")
-        self.root.geometry("500x650")
-        self.root.minsize(450, 550)
+        self.root.geometry("500x520")
+        self.root.minsize(450, 450)
         self.root.configure(bg="#1a1a2e")
+
+        # 设置窗口图标
+        try:
+            if os.path.exists(APP_ICON_PATH):
+                self.root.iconbitmap(APP_ICON_PATH)
+        except Exception:
+            pass
 
         # 居中
         self.root.update_idletasks()
         sw = self.root.winfo_screenwidth()
         sh = self.root.winfo_screenheight()
         x = (sw - 500) // 2
-        y = (sh - 650) // 2
+        y = (sh - 520) // 2
         self.root.geometry(f"+{x}+{y}")
 
         # 状态
@@ -1306,41 +1059,6 @@ class MainWindow:
             fg="#555566", bg="#16213e",
         ).pack(side=tk.LEFT, padx=(6, 0), pady=6)
 
-        # --- 全屏兼容选项 ---
-        compat_frame = tk.Frame(self.root, bg="#16213e")
-        compat_frame.pack(fill=tk.X, padx=20, pady=(8, 3))
-
-        tk.Label(
-            compat_frame, text="全屏兼容:",
-            font=("Microsoft YaHei", 9, "bold"),
-            fg="#e94560", bg="#16213e",
-        ).pack(anchor="w", padx=(10, 0), pady=(6, 2))
-
-        self._borderless_var = tk.BooleanVar(value=False)
-        self._borderless_cb = tk.Checkbutton(
-            compat_frame,
-            text="自动切换无边框窗口模式 (修改GameUserSettings.ini)",
-            variable=self._borderless_var,
-            font=("Microsoft YaHei", 8),
-            fg="#aaaaaa", bg="#16213e",
-            selectcolor="#16213e",
-            activebackground="#16213e", activeforeground="#ffffff",
-            command=self._on_borderless_toggle,
-        )
-        self._borderless_cb.pack(anchor="w", padx=(8, 0), pady=(0, 2))
-
-        self._fullscreen_opt_var = tk.BooleanVar(value=False)
-        self._fullscreen_opt_cb = tk.Checkbutton(
-            compat_frame,
-            text="启用全屏优化兼容 (移除禁用全屏优化的注册表标志)",
-            variable=self._fullscreen_opt_var,
-            font=("Microsoft YaHei", 8),
-            fg="#aaaaaa", bg="#16213e",
-            selectcolor="#16213e",
-            activebackground="#16213e", activeforeground="#ffffff",
-            command=self._on_fullscreen_opt_toggle,
-        )
-        self._fullscreen_opt_cb.pack(anchor="w", padx=(8, 0), pady=(0, 6))
 
         # --- 日志标题 ---
         log_header = tk.Frame(self.root, bg="#1a1a2e")
@@ -1410,8 +1128,6 @@ class MainWindow:
                 self._game_was_running = True
                 self._set_status("PUBG运行中 - 覆盖层已激活", "#3fb950")
                 self.skip_btn.pack_forget()
-                if self._borderless_var.get():
-                    self.root.after(500, patch_pubg_ini_to_borderless)
                 set_overlay_active(True)
                 self._on_pubg_detected()
             else:
@@ -1427,8 +1143,6 @@ class MainWindow:
         self._pubg_running = True
         self._set_status("已手动启动 - 覆盖层已激活 (调试模式)", "#3fb950")
         self.skip_btn.pack_forget()
-        if self._borderless_var.get():
-            self.root.after(500, patch_pubg_ini_to_borderless)
         set_overlay_active(True)
         self._on_pubg_detected()
 
@@ -1472,41 +1186,6 @@ class MainWindow:
         self.font_var.set(fs)
         with state_lock:
             app_state["font_size"] = fs
-
-    def init_compat_settings(self, borderless_mode, fullscreen_opt):
-        self._borderless_var.set(borderless_mode)
-        self._fullscreen_opt_var.set(fullscreen_opt)
-        if borderless_mode:
-            log_message("全屏兼容: 自动切换无边框窗口模式 已启用")
-        if fullscreen_opt:
-            log_message("全屏兼容: 全屏优化兼容 已启用")
-            if not check_fullscreen_opt_disabled()[0]:
-                log_message("PUBG 全屏优化未被禁用，无需修改注册表")
-
-    def _on_borderless_toggle(self):
-        enabled = self._borderless_var.get()
-        save_config(borderless_mode=enabled)
-        if enabled:
-            log_message("全屏兼容: 已开启自动切换无边框窗口模式")
-            if self._pubg_running:
-                patch_pubg_ini_to_borderless()
-        else:
-            log_message("全屏兼容: 已关闭自动切换无边框窗口模式")
-            restore_pubg_ini()
-
-    def _on_fullscreen_opt_toggle(self):
-        enabled = self._fullscreen_opt_var.get()
-        save_config(fullscreen_opt=enabled)
-        if enabled:
-            log_message("全屏兼容: 已开启全屏优化兼容")
-            disabled, path = check_fullscreen_opt_disabled()
-            if disabled:
-                enable_fullscreen_opt()
-                log_message(f"已为 PUBG 启用全屏优化 ({path})")
-            else:
-                log_message("PUBG 全屏优化已处于启用状态")
-        else:
-            log_message("全屏兼容: 已关闭全屏优化兼容 (建议保持开启)")
 
     def _start_log_polling(self):
         """定期从log_queue读取日志并更新UI"""
@@ -1577,8 +1256,6 @@ class MainWindow:
     def _full_exit(self):
         """完全退出"""
         log_message("正在退出程序...")
-        if self._borderless_var.get():
-            restore_pubg_ini()
         shutdown_flag.set()
         if self._check_timer:
             self.root.after_cancel(self._check_timer)
@@ -1779,9 +1456,8 @@ class PubgRangingTool:
     def run(self):
         self.main_window = MainWindow()
 
-        bm = getattr(self, '_saved_bm', False)
-        fo = getattr(self, '_saved_fo', False)
-        self.main_window.init_compat_settings(bm, fo)
+        fo = getattr(self, "_saved_fo", False)
+        self.main_window.init_compat_settings(fo)
 
         def on_detected():
             """PUBG检测到后启动覆盖层"""
@@ -1863,6 +1539,7 @@ class PubgRangingTool:
         elif event_type == "tray_exit":
             self.main_window._full_exit()
 
+
     def _handle_right_click(self, x, y):
         pts_before = len(get_state_snapshot()["points"])
         calib = get_state_snapshot().get("calibration_mode", False)
@@ -1933,6 +1610,7 @@ class PubgRangingTool:
         self.menu_visible = True
         set_menu_visible(True)
 
+
         def on_confirm(value):
             set_reference(value)
             save_config(reference=value)
@@ -1946,6 +1624,7 @@ class PubgRangingTool:
             _, saved_x, saved_y, *_ = load_config()
             self.input_menu = InputMenu(on_confirm, on_close)
             self.input_menu.show(default_value=current_ref, saved_x=saved_x, saved_y=saved_y)
+
             log_message("测距菜单已打开")
 
         self.main_window.root.after(0, _create)
@@ -1960,6 +1639,7 @@ class PubgRangingTool:
         if self.input_menu:
             self.input_menu.destroy()
             self.input_menu = None
+
 
         log_message("测距菜单已关闭")
 
@@ -1995,7 +1675,7 @@ def main():
 
     log_message("PUBG 迫击炮测距工具 v1.1 启动", "good")
 
-    saved_ref, _, _, saved_fs, saved_bm, saved_fo = load_config()
+    saved_ref, _, _, saved_fs, saved_fo = load_config()
     if saved_ref > 0:
         set_reference(saved_ref)
         log_message(f"已加载保存的参考像素: {saved_ref}")
@@ -2004,7 +1684,6 @@ def main():
     log_message(f"标注字体大小: {saved_fs}")
 
     app = PubgRangingTool()
-    app._saved_bm = saved_bm
     app._saved_fo = saved_fo
 
     try:
